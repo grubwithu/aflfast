@@ -187,6 +187,11 @@
     SAYF(cRST "\n"); \
   } while (0)
 
+#define GrubF(x...) do { \
+    SAYF(cLBL "[^] " cRST x); \
+    SAYF(cRST "\n"); \
+  } while (0)
+
 /* Show a prefixed fatal error message (not used in afl). */
 
 #define BADF(x...) do { \

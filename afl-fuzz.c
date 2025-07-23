@@ -55,6 +55,7 @@
 #include <sys/mman.h>
 #include <sys/ioctl.h>
 #include <sys/file.h>
+#include <openssl/sha.h>
 
 #if defined(__APPLE__) || defined(__FreeBSD__) || defined (__OpenBSD__)
 #  include <sys/sysctl.h>
@@ -256,6 +257,9 @@ struct queue_entry {
 
   u8* trace_mini;                     /* Trace bytes, if kept             */
   u32 tc_ref;                         /* Trace bytes ref count            */
+
+  u8  file_checksum[SHA_DIGEST_LENGTH];
+  u32 fuzz_times_since_last_interest;
 
   struct queue_entry *next,           /* Next element, if any             */
                      *next_100;       /* 100 elements ahead               */
@@ -780,6 +784,29 @@ static void mark_as_redundant(struct queue_entry* q, u8 state) {
 
 }
 
+static int calculate_file_sha1(u8* fname, u8* sha1) {
+  FILE *file = fopen(fname, "rb");
+  if (!file) {
+      printf("Failed to open this file: %s\n", fname);
+      return -1;
+  }
+  
+  SHA_CTX sha1_ctx;
+  SHA1_Init(&sha1_ctx);
+  
+  unsigned char buffer[1024];
+  size_t bytes_read;
+  
+  while ((bytes_read = fread(buffer, 1, sizeof(buffer), file)) > 0) {
+      SHA1_Update(&sha1_ctx, buffer, bytes_read);
+  }
+  
+  SHA1_Final(sha1, &sha1_ctx);
+  fclose(file);
+  
+  return 0;
+
+}
 
 /* Append new test case to the queue. */
 
@@ -792,6 +819,8 @@ static void add_to_queue(u8* fname, u32 len, u8 passed_det) {
   q->depth        = cur_depth + 1;
   q->passed_det   = passed_det;
   q->n_fuzz       = 1;
+  q->fuzz_times_since_last_interest = 0;
+  calculate_file_sha1(fname, q->file_checksum);
 
   if (q->depth > max_depth) max_depth = q->depth;
 
@@ -3173,8 +3202,6 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
 
 #endif /* ^!SIMPLE_FILES */
 
-    add_to_queue(fn, len, 0);
-
     if (hnb == 2) {
       queue_top->has_new_cov = 1;
       queued_with_cov++;
@@ -3194,6 +3221,8 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
     if (fd < 0) PFATAL("Unable to create '%s'", fn);
     ck_write(fd, mem, len, fn);
     close(fd);
+
+    add_to_queue(fn, len, 0);
 
     keeping = 1;
 
@@ -4603,6 +4632,20 @@ abort_trimming:
 
 }
 
+static void sha1_hash(const char *str, u32 len, char *sha1_str) {
+    unsigned char digest[SHA_DIGEST_LENGTH];
+    SHA_CTX ctx;
+    SHA1_Init(&ctx);
+    SHA1_Update(&ctx, str, len);
+    SHA1_Final(digest, &ctx);
+
+    // 将 MD5 结果转换为十六进制字符串
+    for(int i = 0; i < SHA_DIGEST_LENGTH; i++) {
+        sprintf(&sha1_str[i*2], "%02x", (unsigned int)digest[i]);
+    }
+    sha1_str[40] = '\0';
+}
+
 
 /* Write a modified test case, run program, process results. Handle
    error conditions, returning 1 if it's time to bail out. This is
@@ -4619,6 +4662,7 @@ EXP_ST u8 common_fuzz_stuff(char** argv, u8* out_buf, u32 len) {
 
   }
 
+  queue_cur->fuzz_times_since_last_interest++;
   write_to_testcase(out_buf, len);
 
   fault = run_target(argv, exec_tmout);
@@ -4646,8 +4690,22 @@ EXP_ST u8 common_fuzz_stuff(char** argv, u8* out_buf, u32 len) {
   }
 
   /* This handles FAULT_ERROR for us: */
-
+  u8 saved = save_if_interesting(argv, out_buf, len, fault);
   queued_discovered += save_if_interesting(argv, out_buf, len, fault);
+  
+  if (saved) {
+    u8 old_md5_string[SHA_DIGEST_LENGTH * 2 + 1] = { 0 };
+    for (u32 i = 0; i < SHA_DIGEST_LENGTH; i++) {
+      sprintf(old_md5_string + i * 2, "%02x", queue_cur->file_checksum[i]);
+    }
+    u8 new_md5_string[SHA_DIGEST_LENGTH * 2 + 1] = { 0 };
+    sha1_hash(out_buf, len, new_md5_string);
+    GrubF("SHA1=%s find new interests after %d tries, New SHA1=%s.", 
+      old_md5_string, 
+      queue_cur->fuzz_times_since_last_interest, 
+      new_md5_string);
+    queue_cur->fuzz_times_since_last_interest = 0;
+  }
 
   if (!(stage_cur % stats_update_freq) || stage_cur + 1 == stage_max)
     show_stats();
