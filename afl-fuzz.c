@@ -8201,6 +8201,8 @@ int main(int argc, char** argv) {
     if (stop_soon) goto stop_fuzzing;
   }
 
+  u64 last_log_time = get_cur_time();
+
   while (1) {
 
     u8 skipped_fuzz;
@@ -8259,6 +8261,25 @@ int main(int argc, char** argv) {
     queue_cur = queue_cur->next;
     current_entry++;
 
+    u64 cur_time = get_cur_time();
+    double passed_minutes = (double)(cur_time - last_log_time) / 1000.0 / 60.0;
+    GrubF("%f\n", passed_minutes);
+    if (passed_minutes > 30.0) {
+      for (struct queue_entry *q = queue; q; q = q->next) {
+        u8 sha1_string[SHA_DIGEST_LENGTH * 2 + 1] = {0};
+        for (u32 i = 0; i < SHA_DIGEST_LENGTH; i++) {
+          sprintf(sha1_string + i * 2, "%02x", q->file_checksum[i]);
+        }
+        static char buffer[2048];
+        sprintf(buffer,
+                "{\"fuzzer\": \"AFL\", \"sha\": \"%s\", \"tries\": %ld}",
+                sha1_string, q->fuzz_times_total
+        );
+        FluentF(buffer);
+      }
+      last_log_time = cur_time;
+    }
+
   }
 
   if (queue_cur) show_stats();
@@ -8271,19 +8292,6 @@ stop_fuzzing:
 
   SAYF(CURSOR_SHOW cLRD "\n\n+++ Testing aborted %s +++\n" cRST,
        stop_soon == 2 ? "programmatically" : "by user");
-
-  for (struct queue_entry *q = queue; q; q = q->next) {
-    u8 sha1_string[SHA_DIGEST_LENGTH * 2 + 1] = {0};
-    for (u32 i = 0; i < SHA_DIGEST_LENGTH; i++) {
-      sprintf(sha1_string + i * 2, "%02x", q->file_checksum[i]);
-    }
-    static char buffer[2048];
-    sprintf(buffer,
-            "{\"fuzzer\": \"AFLFast\", \"sha\": \"%s\", \"tries\": %d}",
-            sha1_string, q->fuzz_times_total
-    );
-    FluentF(buffer);
-  }
     
   /* Running for more than 30 minutes but still doing first cycle? */
 
