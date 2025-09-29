@@ -260,7 +260,7 @@ struct queue_entry {
 
   u8  file_checksum[SHA_DIGEST_LENGTH];
   u32 fuzz_times_since_last_interest;
-  u32 fuzz_times_total;
+  u64 fuzz_times_total;
 
   struct queue_entry *next,           /* Next element, if any             */
                      *next_100;       /* 100 elements ahead               */
@@ -8272,7 +8272,7 @@ int main(int argc, char** argv) {
         }
         static char buffer[2048];
         sprintf(buffer,
-                "{\"fuzzer\": \"AFL\", \"sha\": \"%s\", \"tries\": %ld}",
+                "{\"fuzzer\": \"AFLFast\", \"sha\": \"%s\", \"tries\": %llu}",
                 sha1_string, q->fuzz_times_total
         );
         FluentF(buffer);
