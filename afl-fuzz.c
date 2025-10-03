@@ -4732,7 +4732,7 @@ EXP_ST u8 common_fuzz_stuff(char** argv, u8* out_buf, u32 len) {
   u64 cur_time = get_cur_time();
   double passed_minutes = (double)(cur_time - last_log_time) / 1000.0 / 60.0;
   GrubF("%f\n", passed_minutes);
-  if (passed_minutes > 9.5) {
+  if (passed_minutes > 2.0) {
     for (struct queue_entry *q = queue; q; q = q->next) {
       u8 sha1_string[SHA_DIGEST_LENGTH * 2 + 1] = {0};
       for (u32 i = 0; i < SHA_DIGEST_LENGTH; i++) {
@@ -4743,6 +4743,7 @@ EXP_ST u8 common_fuzz_stuff(char** argv, u8* out_buf, u32 len) {
               "{\"fuzzer\": \"AFLFast\", \"sha\": \"%s\", \"tries\": %llu}",
               sha1_string, q->fuzz_times_total);
       FluentF(buffer);
+      q->fuzz_times_total = 0;
     }
     last_log_time = cur_time;
   }
