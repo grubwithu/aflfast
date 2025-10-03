@@ -225,6 +225,8 @@ static u64 total_bitmap_size,         /* Total bit count for all bitmaps  */
 
 static s32 cpu_core_count;            /* CPU core count                   */
 
+static u64 last_log_time;             /* Last time we sent detailed logs  */
+
 #ifdef HAVE_AFFINITY
 
 static s32 cpu_aff = -1;       	      /* Selected CPU core                */
@@ -4727,6 +4729,24 @@ EXP_ST u8 common_fuzz_stuff(char** argv, u8* out_buf, u32 len) {
     queue_cur->fuzz_times_since_last_interest = 0;
   }
 
+  u64 cur_time = get_cur_time();
+  double passed_minutes = (double)(cur_time - last_log_time) / 1000.0 / 60.0;
+  GrubF("%f\n", passed_minutes);
+  if (passed_minutes > 30.0) {
+    for (struct queue_entry *q = queue; q; q = q->next) {
+      u8 sha1_string[SHA_DIGEST_LENGTH * 2 + 1] = {0};
+      for (u32 i = 0; i < SHA_DIGEST_LENGTH; i++) {
+        sprintf(sha1_string + i * 2, "%02x", q->file_checksum[i]);
+      }
+      static char buffer[2048];
+      sprintf(buffer,
+              "{\"fuzzer\": \"AFLFast\", \"sha\": \"%s\", \"tries\": %llu}",
+              sha1_string, q->fuzz_times_total);
+      FluentF(buffer);
+    }
+    last_log_time = cur_time;
+  }
+
   if (!(stage_cur % stats_update_freq) || stage_cur + 1 == stage_max)
     show_stats();
 
@@ -8201,7 +8221,7 @@ int main(int argc, char** argv) {
     if (stop_soon) goto stop_fuzzing;
   }
 
-  u64 last_log_time = get_cur_time();
+  last_log_time = get_cur_time();
 
   while (1) {
 
@@ -8260,25 +8280,6 @@ int main(int argc, char** argv) {
 
     queue_cur = queue_cur->next;
     current_entry++;
-
-    u64 cur_time = get_cur_time();
-    double passed_minutes = (double)(cur_time - last_log_time) / 1000.0 / 60.0;
-    GrubF("%f\n", passed_minutes);
-    if (passed_minutes > 30.0) {
-      for (struct queue_entry *q = queue; q; q = q->next) {
-        u8 sha1_string[SHA_DIGEST_LENGTH * 2 + 1] = {0};
-        for (u32 i = 0; i < SHA_DIGEST_LENGTH; i++) {
-          sprintf(sha1_string + i * 2, "%02x", q->file_checksum[i]);
-        }
-        static char buffer[2048];
-        sprintf(buffer,
-                "{\"fuzzer\": \"AFLFast\", \"sha\": \"%s\", \"tries\": %llu}",
-                sha1_string, q->fuzz_times_total
-        );
-        FluentF(buffer);
-      }
-      last_log_time = cur_time;
-    }
 
   }
 
